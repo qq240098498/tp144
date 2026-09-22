@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { load, save, MAX_NOTE, MATCH_STATUS } = require('./store');
 const { ApiError, pickText } = require('./errors');
 const { nameMaps } = require('./standings');
+const { requireWritable } = require('./seasonUtil');
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -26,13 +27,13 @@ function checkDate(value) {
 }
 
 // 主场场地没填时按主队的主场算，用这块场地去判同日时间冲突
-function resolveVenueId(match, data) {
+function resolveVenueId(match, season, teams) {
   if (match.venueId) return match.venueId;
-  const home = data.teams.find((item) => item.id === match.homeTeamId);
+  const home = teams.get(match.homeTeamId);
   return home ? home.venueId : '';
 }
 
-function validatePayload(input, data, selfId) {
+function validatePayload(input, data, season, teams, selfId) {
   const source = input && typeof input === 'object' ? input : {};
 
   const round = Number(source.round);
@@ -49,11 +50,11 @@ function validatePayload(input, data, selfId) {
 
   const homeTeamId = pickText(source.homeTeamId);
   const awayTeamId = pickText(source.awayTeamId);
-  if (!data.teams.some((item) => item.id === homeTeamId)) {
-    throw new ApiError(404, 'HOME_TEAM_NOT_FOUND', '主队没有登记过', 'homeTeamId');
+  if (!teams.has(homeTeamId)) {
+    throw new ApiError(404, 'HOME_TEAM_NOT_FOUND', '主队不在本赛季名册里', 'homeTeamId');
   }
-  if (!data.teams.some((item) => item.id === awayTeamId)) {
-    throw new ApiError(404, 'AWAY_TEAM_NOT_FOUND', '客队没有登记过', 'awayTeamId');
+  if (!teams.has(awayTeamId)) {
+    throw new ApiError(404, 'AWAY_TEAM_NOT_FOUND', '客队不在本赛季名册里', 'awayTeamId');
   }
   if (homeTeamId === awayTeamId) {
     throw new ApiError(400, 'TEAM_SAME', '主队与客队不能是同一支球队', 'awayTeamId');
@@ -91,7 +92,7 @@ function validatePayload(input, data, selfId) {
   const candidate = { round, date, kickoff, venueId, homeTeamId, awayTeamId };
 
   // 同一轮里一支球队只能出现一次
-  const sameRound = data.matches.filter((item) => item.id !== selfId && item.round === round
+  const sameRound = season.matches.filter((item) => item.id !== selfId && item.round === round
     && (item.homeTeamId === homeTeamId || item.awayTeamId === homeTeamId
       || item.homeTeamId === awayTeamId || item.awayTeamId === awayTeamId));
   if (sameRound.length > 0) {
@@ -99,10 +100,10 @@ function validatePayload(input, data, selfId) {
   }
 
   // 同一天同一块场地不能挨得太近
-  const resolved = resolveVenueId(candidate, data);
+  const resolved = resolveVenueId(candidate, season, teams);
   if (resolved) {
-    const sameDay = data.matches.filter((item) => item.id !== selfId && item.date === date
-      && resolveVenueId(item, data) === resolved && item.status !== '取消');
+    const sameDay = season.matches.filter((item) => item.id !== selfId && item.date === date
+      && resolveVenueId(item, season, teams) === resolved && item.status !== '取消');
     const clash = sameDay.find((item) => Math.abs(minutesOf(item.kickoff) - minutesOf(kickoff)) < MIN_GAP_MINUTES);
     if (clash) {
       const venue = data.venues.find((item) => item.id === resolved);
@@ -124,10 +125,10 @@ function validatePayload(input, data, selfId) {
   };
 }
 
-function decorate(match, teams, venues) {
+function decorate(match, teams, venues, season) {
   const home = teams.get(match.homeTeamId);
   const away = teams.get(match.awayTeamId);
-  const venue = venues.get(resolveVenueId(match, { teams: Array.from(teams.values()), venues: Array.from(venues.values()) }));
+  const venue = venues.get(resolveVenueId(match, season, teams));
   const scoreText = match.status === '已赛' ? `${match.homeGoals} : ${match.awayGoals}` : '';
   let winner = '';
   if (match.status === '已赛') {
@@ -152,10 +153,9 @@ function listMatches(options) {
   const round = Number(pickText(input.round));
   const status = pickText(input.status);
   const keyword = pickText(input.keyword).toLowerCase();
-  const data = load();
-  const { teams, venues } = nameMaps();
+  const { data, season, teams, venues } = nameMaps(input.seasonId);
 
-  let list = data.matches.slice();
+  let list = season.matches.slice();
   if (Number.isInteger(round) && round > 0) list = list.filter((item) => item.round === round);
   if (status) list = list.filter((item) => item.status === status);
   if (keyword) {
@@ -169,39 +169,46 @@ function listMatches(options) {
 
   list.sort((a, b) => (a.round - b.round) || (a.date < b.date ? -1 : 1) || (a.kickoff < b.kickoff ? -1 : 1));
 
-  const rounds = Array.from(new Set(data.matches.map((item) => item.round))).sort((a, b) => a - b);
+  const rounds = Array.from(new Set(season.matches.map((item) => item.round))).sort((a, b) => a - b);
   const roundSummaries = rounds.map((item) => ({
     round: item,
-    total: data.matches.filter((m) => m.round === item).length,
-    played: data.matches.filter((m) => m.round === item && m.status === '已赛').length,
-    pending: data.matches.filter((m) => m.round === item && m.status === '待赛').length,
-    postponed: data.matches.filter((m) => m.round === item && m.status === '延期').length,
+    total: season.matches.filter((m) => m.round === item).length,
+    played: season.matches.filter((m) => m.round === item && m.status === '已赛').length,
+    pending: season.matches.filter((m) => m.round === item && m.status === '待赛').length,
+    postponed: season.matches.filter((m) => m.round === item && m.status === '延期').length,
   }));
 
   return {
-    matches: list.map((item) => decorate(item, teams, venues)),
-    total: data.matches.length,
+    matches: list.map((item) => decorate(item, teams, venues, season)),
+    total: season.matches.length,
     filtered: list.length,
     rounds: roundSummaries,
-    season: data.meta.season,
+    seasonId: season.id,
+    seasonName: season.name,
+    seasonStatus: season.status,
+    writable: season.status === '进行中' && season.id === data.meta.activeSeasonId,
   };
 }
 
 function createMatch(payload) {
   const data = load();
-  const checked = validatePayload(payload, data, '');
+  const season = requireWritable(data);
+  const { teams, venues } = nameMaps(season.id);
+  const checked = validatePayload(payload, data, season, teams, '');
   const now = new Date().toISOString();
   const created = { id: crypto.randomUUID(), ...checked, createdAt: now, updatedAt: now };
-  data.matches.push(created);
+  season.matches.push(created);
+  season.updatedAt = now;
   save(data);
-  const { teams, venues } = nameMaps();
-  return decorate(created, teams, venues);
+  return decorate(created, teams, venues, season);
 }
 
 function updateMatch(id, payload) {
   const data = load();
-  const found = data.matches.find((item) => item.id === id);
+  const season = requireWritable(data);
+  const found = season.matches.find((item) => item.id === id);
   if (!found) throw new ApiError(404, 'MATCH_NOT_FOUND', '这场赛程不存在或已被删除', '');
+  const { teams, venues } = nameMaps(season.id);
   const patch = payload && typeof payload === 'object' ? { ...payload } : {};
   // 状态改回没打完时把比分一并清掉，否则这场会卡在带比分又不能改的状态里
   if (patch.status && patch.status !== '已赛' && patch.homeGoals === undefined && patch.awayGoals === undefined) {
@@ -209,12 +216,12 @@ function updateMatch(id, payload) {
     patch.awayGoals = null;
   }
   const merged = { ...found, ...patch };
-  const checked = validatePayload(merged, data, found.id);
+  const checked = validatePayload(merged, data, season, teams, found.id);
   Object.assign(found, checked);
   found.updatedAt = new Date().toISOString();
+  season.updatedAt = found.updatedAt;
   save(data);
-  const { teams, venues } = nameMaps();
-  return decorate(found, teams, venues);
+  return decorate(found, teams, venues, season);
 }
 
 // 单独登记比分：登记完自动把这场标成已赛
@@ -229,9 +236,11 @@ function recordResult(id, payload) {
 
 function deleteMatch(id) {
   const data = load();
-  const index = data.matches.findIndex((item) => item.id === id);
+  const season = requireWritable(data);
+  const index = season.matches.findIndex((item) => item.id === id);
   if (index === -1) throw new ApiError(404, 'MATCH_NOT_FOUND', '这场赛程不存在或已被删除', '');
-  const [removed] = data.matches.splice(index, 1);
+  const [removed] = season.matches.splice(index, 1);
+  season.updatedAt = new Date().toISOString();
   save(data);
   return { id: removed.id, round: removed.round };
 }

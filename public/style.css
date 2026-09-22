@@ -51,6 +51,22 @@ body {
 .brand strong { display: block; color: #fff; font-size: 14px; }
 .brand small { color: #7d8b99; font-size: 11px; }
 
+.season-pick { display: flex; flex-direction: column; gap: 5px; padding: 0 6px; font-size: 11px; color: #7d8b99; }
+.season-pick select {
+  padding: 8px 9px; border: 1px solid #2c3b4b; border-radius: 9px;
+  background: #1d2836; color: #fff; font-family: inherit; font-size: 12.5px;
+}
+.season-pick select option { background: #1d2836; }
+
+.archive-banner {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 14px; padding: 10px 14px;
+  border: 1px solid #e8d3bd; border-radius: var(--radius);
+  background: var(--amber-soft); color: #7a5210; font-size: 12.5px;
+}
+.archive-banner[hidden] { display: none; }
+.archive-banner strong { color: var(--amber); }
+
 .nav { display: flex; flex-direction: column; gap: 4px; }
 .nav-item {
   display: flex; align-items: center; justify-content: space-between;
@@ -160,6 +176,9 @@ table.grid.standings td:nth-child(n+3) { font-family: Consolas, "Courier New", m
 .pill.wait { background: #eef2f7; color: var(--ink-soft); }
 .pill.late { background: var(--amber-soft); color: var(--amber); }
 .pill.off { background: var(--danger-soft); color: var(--danger); }
+.pill.up { background: #e6f6ec; color: #1c7f43; }
+.pill.down { background: var(--danger-soft); color: var(--danger); }
+.pill.stay { background: #eef2f7; color: #556474; }
 .muted { color: var(--ink-soft); }
 .empty { display: none; color: var(--ink-soft); font-size: 13px; padding: 10px 2px; }
 .empty.show { display: block; }
@@ -206,3 +225,33 @@ table.grid.standings td:nth-child(n+3) { font-family: Consolas, "Courier New", m
 }
 .toast.ok { background: var(--brand); }
 .toast.bad { background: var(--danger); }
+
+/* 宽抽屉（结算与建季用） */
+.drawer.wide { width: 560px; }
+
+.preview-box {
+  border: 1px solid var(--line); border-radius: 10px;
+  background: #fafbfd; padding: 10px 12px;
+  max-height: 46vh; overflow-y: auto;
+}
+.preview-box .mini-grid th, .preview-box .mini-grid td { padding: 6px 8px; font-size: 12px; }
+.seed-input { width: 58px; padding: 4px 6px; text-align: center; }
+.warn-line { color: var(--amber); background: var(--amber-soft); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; margin: 0 0 8px; }
+.change-line { color: #7a4a06; background: #fdf7e8; border: 1px dashed #e5c78f; border-radius: 8px; padding: 7px 10px; font-size: 12.5px; margin: 0 0 8px; }
+
+.field.check { flex-direction: row; align-items: flex-start; gap: 8px; }
+.field.check input { margin-top: 3px; }
+
+.promote-pick { display: flex; flex-direction: column; gap: 6px; }
+.promote-pick label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+
+.holes-box {
+  margin-top: 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: #fff; padding: 9px 12px; font-size: 12.5px;
+}
+.holes-box ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+
+.log-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.log-list li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; border-bottom: 1px dashed var(--line); padding-bottom: 8px; font-size: 12.5px; }
+.log-list li:last-child { border-bottom: none; padding-bottom: 0; }
+.card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

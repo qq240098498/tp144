@@ -17,8 +17,14 @@
         </div>
       </div>
 
+      <label class="season-pick">
+        <span>查看赛季</span>
+        <select id="season-select"></select>
+      </label>
+
       <nav class="nav" id="nav">
         <button type="button" class="nav-item is-active" data-view="overview"><span>概览</span><em>全局</em></button>
+        <button type="button" class="nav-item" data-view="seasons"><span>赛季</span><em id="nav-seasons">升降级</em></button>
         <button type="button" class="nav-item" data-view="teams"><span>球队</span><em id="nav-teams">0</em></button>
         <button type="button" class="nav-item" data-view="venues"><span>场地</span><em id="nav-venues">0</em></button>
         <button type="button" class="nav-item" data-view="matches"><span>赛程</span><em id="nav-matches">0</em></button>
@@ -42,6 +48,11 @@
         <div class="head-actions" id="head-actions"></div>
       </header>
 
+      <div class="archive-banner" id="archive-banner" hidden>
+        <strong>历史归档（只读）</strong>
+        <span id="archive-banner-text"></span>
+      </div>
+
       <section class="view is-active" id="view-overview">
         <div class="stat-row" id="stat-row"></div>
         <div class="split">
@@ -50,14 +61,22 @@
             <ul class="feed" id="recent-feed"></ul>
           </article>
           <article class="card">
-            <header class="card-head"><h2>积分榜前三</h2><span class="hint" id="points-hint"></span></header>
+            <header class="card-head"><h2 id="podium-title">积分榜前三</h2><span class="hint" id="points-hint"></span></header>
             <ul class="podium" id="podium"></ul>
           </article>
         </div>
       </section>
 
+      <section class="view" id="view-seasons">
+        <div id="season-panel"></div>
+      </section>
+
       <section class="view" id="view-teams">
         <div class="toolbar">
+          <div class="segmented" id="team-scope-filter">
+            <button type="button" class="is-active" data-value="roster">本季名册</button>
+            <button type="button" data-value="outsider">候选名录</button>
+          </div>
           <div class="segmented" id="team-status-filter">
             <button type="button" class="is-active" data-value="">全部</button>
             <button type="button" data-value="参赛">参赛</button>
@@ -68,11 +87,7 @@
         </div>
         <article class="card">
           <table class="grid">
-            <thead>
-              <tr>
-                <th>档位</th><th>球队</th><th>简称</th><th>城市</th><th>主场</th><th>场次</th><th>状态</th><th>备注</th><th></th>
-              </tr>
-            </thead>
+            <thead id="team-head"></thead>
             <tbody id="team-rows"></tbody>
           </table>
           <p class="empty" id="team-empty">没有符合条件的球队</p>
@@ -122,12 +137,7 @@
         </div>
         <article class="card">
           <table class="grid standings">
-            <thead>
-              <tr>
-                <th>名次</th><th>球队</th><th>场次</th><th>胜</th><th>平</th><th>负</th>
-                <th>进球</th><th>失球</th><th>净胜</th><th>积分</th>
-              </tr>
-            </thead>
+            <thead id="table-head"></thead>
             <tbody id="table-rows"></tbody>
           </table>
         </article>
@@ -136,13 +146,13 @@
   </div>
 
   <div class="backdrop" id="backdrop"></div>
-  <aside class="drawer" id="drawer">
+  <aside class="drawer wide" id="drawer">
     <header class="drawer-head">
       <h2 id="drawer-title">编辑</h2>
       <button type="button" class="icon" id="drawer-close">×</button>
     </header>
     <form id="drawer-form" autocomplete="off"></form>
-    <footer class="drawer-foot">
+    <footer class="drawer-foot" id="drawer-foot">
       <button type="button" class="primary" id="drawer-submit">保存</button>
       <button type="button" class="ghost" id="drawer-cancel">取消</button>
     </footer>

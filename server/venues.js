@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { load, save, MAX_VENUE_NAME, MAX_NOTE } = require('./store');
 const { ApiError, pickText, isBlank } = require('./errors');
+const { findSeason } = require('./seasonUtil');
 
 const WEEKDAY_TEXT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -37,9 +38,17 @@ function validatePayload(input, data, selfId) {
   return { name, city, capacity, weekdays: weekdays.slice().sort((a, b) => a - b), note: pickText(source.note) };
 }
 
-function withExtras(venue, data) {
-  const homeTeams = data.teams.filter((item) => item.venueId === venue.id);
-  const matches = data.matches.filter((item) => item.venueId === venue.id).length;
+// 已排场次按当前查看的赛季统计；主场球队取该季名册里的
+function withExtras(venue, data, season) {
+  const homeTeams = season.roster
+    .map((row) => data.teams.find((team) => team.id === row.teamId))
+    .filter((team) => team && team.venueId === venue.id);
+  const matches = season.matches.filter((item) => {
+    if (item.venueId === venue.id) return true;
+    if (item.venueId) return false;
+    const home = data.teams.find((team) => team.id === item.homeTeamId);
+    return home && home.venueId === venue.id;
+  }).length;
   return {
     ...venue,
     weekdaysText: venue.weekdays.map((day) => WEEKDAY_TEXT[day]).join('、'),
@@ -53,6 +62,7 @@ function listVenues(options) {
   const input = options && typeof options === 'object' ? options : {};
   const keyword = pickText(input.keyword).toLowerCase();
   const data = load();
+  const season = findSeason(data, input.seasonId);
 
   let list = data.venues.slice();
   if (keyword) {
@@ -61,8 +71,10 @@ function listVenues(options) {
   list.sort((a, b) => b.capacity - a.capacity);
 
   return {
-    venues: list.map((item) => withExtras(item, data)),
+    venues: list.map((item) => withExtras(item, data, season)),
     total: data.venues.length,
+    seasonId: season.id,
+    seasonName: season.name,
     weekdayText: WEEKDAY_TEXT,
   };
 }
@@ -74,7 +86,8 @@ function createVenue(payload) {
   const created = { id: crypto.randomUUID(), ...checked, createdAt: now, updatedAt: now };
   data.venues.push(created);
   save(data);
-  return withExtras(created, data);
+  const season = findSeason(data, data.meta.activeSeasonId);
+  return withExtras(created, data, season);
 }
 
 function updateVenue(id, payload) {
@@ -86,17 +99,22 @@ function updateVenue(id, payload) {
   Object.assign(found, checked);
   found.updatedAt = new Date().toISOString();
   save(data);
-  return withExtras(found, data);
+  const season = findSeason(data, data.meta.activeSeasonId);
+  return withExtras(found, data, season);
 }
 
+// 场地被任何一季的赛程用过都不能删，历史记录要留得住
 function deleteVenue(id) {
   const data = load();
   const index = data.venues.findIndex((item) => item.id === id);
   if (index === -1) throw new ApiError(404, 'VENUE_NOT_FOUND', '这个场地不存在或已被删除', '');
-  const homeCount = data.teams.filter((item) => item.venueId === id).length;
-  const matchCount = data.matches.filter((item) => item.venueId === id).length;
-  if (homeCount > 0 || matchCount > 0) {
-    throw new ApiError(409, 'VENUE_IN_USE', `这个场地还被 ${homeCount} 支球队当主场、${matchCount} 场赛程在用，不能直接删`, '');
+  const homeSeasons = data.seasons.filter((season) => season.roster.some((row) => {
+    const team = data.teams.find((item) => item.id === row.teamId);
+    return team && team.venueId === id;
+  }));
+  const usedSeasons = data.seasons.filter((season) => season.matches.some((m) => m.venueId === id));
+  if (homeSeasons.length > 0 || usedSeasons.length > 0) {
+    throw new ApiError(409, 'VENUE_IN_USE', `这个场地在 ${new Set([...homeSeasons, ...usedSeasons]).size} 个赛季里当过主场或承办过比赛，不能直接删`, '');
   }
   const [removed] = data.venues.splice(index, 1);
   save(data);

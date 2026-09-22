@@ -12,14 +12,65 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, port: PORT });
 });
 
-app.get('/api/summary', (_req, res) => {
-  res.json(api.summary());
+app.get('/api/summary', (req, res) => {
+  res.json(api.summary({ seasonId: api.readQuery(req.query, 'seasonId') }));
+});
+
+// 跨赛季：赛季清单、详情、切换查看、结算预览/确认、下一季预览/建季
+app.get('/api/seasons', (_req, res) => {
+  res.json(api.listSeasons());
+});
+
+app.get('/api/seasons/detail', (req, res) => {
+  res.json(api.getSeason(api.readQuery(req.query, 'seasonId')));
+});
+
+app.post('/api/seasons/switch', (req, res) => {
+  try {
+    res.json(api.switchSeason(api.readText(req.body && req.body.seasonId)));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/seasons/settle/preview', (req, res) => {
+  try {
+    res.json(api.settlePreview(req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/seasons/settle', (req, res) => {
+  try {
+    res.json(api.confirmSettle(req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/seasons/next/preview', (req, res) => {
+  try {
+    res.json(api.newSeasonPreview(req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+app.post('/api/seasons', (req, res) => {
+  try {
+    res.status(201).json(api.createSeason(req.body));
+  } catch (err) {
+    sendError(res, err);
+  }
 });
 
 app.get('/api/teams', (req, res) => {
   res.json(api.listTeams({
     keyword: api.readQuery(req.query, 'keyword'),
     status: api.readQuery(req.query, 'status'),
+    scope: api.readQuery(req.query, 'scope'),
+    seasonId: api.readQuery(req.query, 'seasonId'),
   }));
 });
 
@@ -48,7 +99,10 @@ app.delete('/api/teams/:id', (req, res) => {
 });
 
 app.get('/api/venues', (req, res) => {
-  res.json(api.listVenues({ keyword: api.readQuery(req.query, 'keyword') }));
+  res.json(api.listVenues({
+    keyword: api.readQuery(req.query, 'keyword'),
+    seasonId: api.readQuery(req.query, 'seasonId'),
+  }));
 });
 
 app.post('/api/venues', (req, res) => {
@@ -80,6 +134,7 @@ app.get('/api/matches', (req, res) => {
     round: api.readQuery(req.query, 'round'),
     status: api.readQuery(req.query, 'status'),
     keyword: api.readQuery(req.query, 'keyword'),
+    seasonId: api.readQuery(req.query, 'seasonId'),
   }));
 });
 
@@ -117,7 +172,10 @@ app.delete('/api/matches/:id', (req, res) => {
 });
 
 app.get('/api/standings', (req, res) => {
-  res.json(api.computeTable({ keyword: api.readQuery(req.query, 'keyword') }));
+  res.json(api.computeTable({
+    keyword: api.readQuery(req.query, 'keyword'),
+    seasonId: api.readQuery(req.query, 'seasonId'),
+  }));
 });
 
 app.use('/api', (_req, res) => {
