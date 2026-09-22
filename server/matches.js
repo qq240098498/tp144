@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { load, save, MAX_NOTE, MATCH_STATUS } = require('./store');
 const { ApiError, pickText } = require('./errors');
 const { nameMaps } = require('./standings');
+const { getSeason } = require('./teams');
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -32,8 +33,9 @@ function resolveVenueId(match, data) {
   return home ? home.venueId : '';
 }
 
-function validatePayload(input, data, selfId) {
+function validatePayload(input, data, season, selfId) {
   const source = input && typeof input === 'object' ? input : {};
+  const memberIds = new Set(season.roster.map((item) => item.teamId));
 
   const round = Number(source.round);
   if (!Number.isInteger(round) || round < 1 || round > 40) {
@@ -49,11 +51,11 @@ function validatePayload(input, data, selfId) {
 
   const homeTeamId = pickText(source.homeTeamId);
   const awayTeamId = pickText(source.awayTeamId);
-  if (!data.teams.some((item) => item.id === homeTeamId)) {
-    throw new ApiError(404, 'HOME_TEAM_NOT_FOUND', '主队没有登记过', 'homeTeamId');
+  if (!memberIds.has(homeTeamId)) {
+    throw new ApiError(404, 'HOME_TEAM_NOT_FOUND', '主队不在本赛季的参赛名单里', 'homeTeamId');
   }
-  if (!data.teams.some((item) => item.id === awayTeamId)) {
-    throw new ApiError(404, 'AWAY_TEAM_NOT_FOUND', '客队没有登记过', 'awayTeamId');
+  if (!memberIds.has(awayTeamId)) {
+    throw new ApiError(404, 'AWAY_TEAM_NOT_FOUND', '客队不在本赛季的参赛名单里', 'awayTeamId');
   }
   if (homeTeamId === awayTeamId) {
     throw new ApiError(400, 'TEAM_SAME', '主队与客队不能是同一支球队', 'awayTeamId');
@@ -90,23 +92,26 @@ function validatePayload(input, data, selfId) {
 
   const candidate = { round, date, kickoff, venueId, homeTeamId, awayTeamId };
 
-  // 同一轮里一支球队只能出现一次
-  const sameRound = data.matches.filter((item) => item.id !== selfId && item.round === round
-    && (item.homeTeamId === homeTeamId || item.awayTeamId === homeTeamId
-      || item.homeTeamId === awayTeamId || item.awayTeamId === awayTeamId));
-  if (sameRound.length > 0) {
-    throw new ApiError(409, 'ROUND_CONFLICT', `第 ${round} 轮里这两支球队已经各有一场了，同一轮不能重复出场`, 'round');
-  }
+  // 取消的场次不占轮次与场地档期；把一场改成取消时也不应被既有冲突拦住
+  if (status !== '取消') {
+    // 同一轮里一支球队只能出现一次（已取消的场次不占位）
+    const sameRound = season.matches.filter((item) => item.id !== selfId && item.status !== '取消' && item.round === round
+      && (item.homeTeamId === homeTeamId || item.awayTeamId === homeTeamId
+        || item.homeTeamId === awayTeamId || item.awayTeamId === awayTeamId));
+    if (sameRound.length > 0) {
+      throw new ApiError(409, 'ROUND_CONFLICT', `第 ${round} 轮里这两支球队已经各有一场了，同一轮不能重复出场`, 'round');
+    }
 
-  // 同一天同一块场地不能挨得太近
-  const resolved = resolveVenueId(candidate, data);
-  if (resolved) {
-    const sameDay = data.matches.filter((item) => item.id !== selfId && item.date === date
-      && resolveVenueId(item, data) === resolved && item.status !== '取消');
-    const clash = sameDay.find((item) => Math.abs(minutesOf(item.kickoff) - minutesOf(kickoff)) < MIN_GAP_MINUTES);
-    if (clash) {
-      const venue = data.venues.find((item) => item.id === resolved);
-      throw new ApiError(409, 'VENUE_TIME_CONFLICT', `${date} 这天 ${venue ? venue.name : '这块场地'} 的 ${clash.kickoff} 已经有一场了，两场之间至少隔两小时`, 'kickoff');
+    // 同一天同一块场地不能挨得太近（跨赛季共用场地时，历史赛季不参与当季冲突判断）
+    const resolved = resolveVenueId(candidate, data);
+    if (resolved) {
+      const sameDay = season.matches.filter((item) => item.id !== selfId && item.date === date
+        && resolveVenueId(item, data) === resolved && item.status !== '取消');
+      const clash = sameDay.find((item) => Math.abs(minutesOf(item.kickoff) - minutesOf(kickoff)) < MIN_GAP_MINUTES);
+      if (clash) {
+        const venue = data.venues.find((item) => item.id === resolved);
+        throw new ApiError(409, 'VENUE_TIME_CONFLICT', `${date} 这天 ${venue ? venue.name : '这块场地'} 的 ${clash.kickoff} 已经有一场了，两场之间至少隔两小时`, 'kickoff');
+      }
     }
   }
 
@@ -124,10 +129,10 @@ function validatePayload(input, data, selfId) {
   };
 }
 
-function decorate(match, teams, venues) {
+function decorate(match, teams, venues, data) {
   const home = teams.get(match.homeTeamId);
   const away = teams.get(match.awayTeamId);
-  const venue = venues.get(resolveVenueId(match, { teams: Array.from(teams.values()), venues: Array.from(venues.values()) }));
+  const venue = venues.get(resolveVenueId(match, data));
   const scoreText = match.status === '已赛' ? `${match.homeGoals} : ${match.awayGoals}` : '';
   let winner = '';
   if (match.status === '已赛') {
@@ -153,9 +158,10 @@ function listMatches(options) {
   const status = pickText(input.status);
   const keyword = pickText(input.keyword).toLowerCase();
   const data = load();
-  const { teams, venues } = nameMaps();
+  const season = getSeason(data, input.seasonId);
+  const { teams, venues } = nameMaps(data);
 
-  let list = data.matches.slice();
+  let list = season.matches.slice();
   if (Number.isInteger(round) && round > 0) list = list.filter((item) => item.round === round);
   if (status) list = list.filter((item) => item.status === status);
   if (keyword) {
@@ -169,69 +175,87 @@ function listMatches(options) {
 
   list.sort((a, b) => (a.round - b.round) || (a.date < b.date ? -1 : 1) || (a.kickoff < b.kickoff ? -1 : 1));
 
-  const rounds = Array.from(new Set(data.matches.map((item) => item.round))).sort((a, b) => a - b);
+  const rounds = Array.from(new Set(season.matches.map((item) => item.round))).sort((a, b) => a - b);
   const roundSummaries = rounds.map((item) => ({
     round: item,
-    total: data.matches.filter((m) => m.round === item).length,
-    played: data.matches.filter((m) => m.round === item && m.status === '已赛').length,
-    pending: data.matches.filter((m) => m.round === item && m.status === '待赛').length,
-    postponed: data.matches.filter((m) => m.round === item && m.status === '延期').length,
+    total: season.matches.filter((m) => m.round === item).length,
+    played: season.matches.filter((m) => m.round === item && m.status === '已赛').length,
+    pending: season.matches.filter((m) => m.round === item && m.status === '待赛').length,
+    postponed: season.matches.filter((m) => m.round === item && m.status === '延期').length,
   }));
 
   return {
-    matches: list.map((item) => decorate(item, teams, venues)),
-    total: data.matches.length,
+    seasonId: season.id,
+    seasonName: season.name,
+    seasonStatus: season.status,
+    matches: list.map((item) => decorate(item, teams, venues, data)),
+    total: season.matches.length,
     filtered: list.length,
     rounds: roundSummaries,
-    season: data.meta.season,
   };
 }
 
+function assertWritable(season) {
+  if (season.status !== '进行中') {
+    throw new ApiError(409, 'SEASON_FINALIZED', '这一季已经收官，赛程与比分都冻结了，只能查看', '');
+  }
+}
+
 function createMatch(payload) {
+  const input = payload && typeof payload === 'object' ? payload : {};
   const data = load();
-  const checked = validatePayload(payload, data, '');
+  const season = getSeason(data, input.seasonId);
+  assertWritable(season);
+  const checked = validatePayload(input, data, season, '');
   const now = new Date().toISOString();
   const created = { id: crypto.randomUUID(), ...checked, createdAt: now, updatedAt: now };
-  data.matches.push(created);
+  season.matches.push(created);
   save(data);
-  const { teams, venues } = nameMaps();
-  return decorate(created, teams, venues);
+  const { teams, venues } = nameMaps(data);
+  return decorate(created, teams, venues, data);
 }
 
 function updateMatch(id, payload) {
+  const input = payload && typeof payload === 'object' ? payload : {};
   const data = load();
-  const found = data.matches.find((item) => item.id === id);
+  const season = getSeason(data, input.seasonId);
+  assertWritable(season);
+  const found = season.matches.find((item) => item.id === id);
   if (!found) throw new ApiError(404, 'MATCH_NOT_FOUND', '这场赛程不存在或已被删除', '');
-  const patch = payload && typeof payload === 'object' ? { ...payload } : {};
+  const patch = { ...input };
   // 状态改回没打完时把比分一并清掉，否则这场会卡在带比分又不能改的状态里
   if (patch.status && patch.status !== '已赛' && patch.homeGoals === undefined && patch.awayGoals === undefined) {
     patch.homeGoals = null;
     patch.awayGoals = null;
   }
   const merged = { ...found, ...patch };
-  const checked = validatePayload(merged, data, found.id);
+  const checked = validatePayload(merged, data, season, found.id);
   Object.assign(found, checked);
   found.updatedAt = new Date().toISOString();
   save(data);
-  const { teams, venues } = nameMaps();
-  return decorate(found, teams, venues);
+  const { teams, venues } = nameMaps(data);
+  return decorate(found, teams, venues, data);
 }
 
 // 单独登记比分：登记完自动把这场标成已赛
 function recordResult(id, payload) {
   const source = payload && typeof payload === 'object' ? payload : {};
   return updateMatch(id, {
+    seasonId: source.seasonId,
     status: '已赛',
     homeGoals: source.homeGoals,
     awayGoals: source.awayGoals,
   });
 }
 
-function deleteMatch(id) {
+function deleteMatch(id, options) {
+  const input = options && typeof options === 'object' ? options : {};
   const data = load();
-  const index = data.matches.findIndex((item) => item.id === id);
+  const season = getSeason(data, input.seasonId);
+  assertWritable(season);
+  const index = season.matches.findIndex((item) => item.id === id);
   if (index === -1) throw new ApiError(404, 'MATCH_NOT_FOUND', '这场赛程不存在或已被删除', '');
-  const [removed] = data.matches.splice(index, 1);
+  const [removed] = season.matches.splice(index, 1);
   save(data);
   return { id: removed.id, round: removed.round };
 }

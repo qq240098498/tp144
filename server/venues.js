@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { load, save, MAX_VENUE_NAME, MAX_NOTE } = require('./store');
 const { ApiError, pickText, isBlank } = require('./errors');
+const { getSeason } = require('./teams');
 
 const WEEKDAY_TEXT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -37,15 +38,35 @@ function validatePayload(input, data, selfId) {
   return { name, city, capacity, weekdays: weekdays.slice().sort((a, b) => a - b), note: pickText(source.note) };
 }
 
-function withExtras(venue, data) {
-  const homeTeams = data.teams.filter((item) => item.venueId === venue.id);
-  const matches = data.matches.filter((item) => item.venueId === venue.id).length;
+function withExtras(venue, data, season) {
+  const memberIds = new Set(season.roster.map((item) => item.teamId));
+  const homeTeams = data.teams
+    .filter((item) => item.venueId === venue.id && memberIds.has(item.id))
+    .map((item) => item.name);
+  const matchCount = season.matches.filter((item) => {
+    if (item.venueId === venue.id) return true;
+    // 场地留空时按主队主场算
+    if (!item.venueId) {
+      const home = data.teams.find((team) => team.id === item.homeTeamId);
+      return Boolean(home && home.venueId === venue.id);
+    }
+    return false;
+  }).length;
+  const allTimeMatchCount = data.seasons.reduce((count, s) => count + s.matches.filter((item) => {
+    if (item.venueId === venue.id) return true;
+    if (!item.venueId) {
+      const home = data.teams.find((team) => team.id === item.homeTeamId);
+      return Boolean(home && home.venueId === venue.id);
+    }
+    return false;
+  }).length, 0);
   return {
     ...venue,
     weekdaysText: venue.weekdays.map((day) => WEEKDAY_TEXT[day]).join('、'),
-    homeTeams: homeTeams.map((item) => item.name),
+    homeTeams,
     homeTeamCount: homeTeams.length,
-    matchCount: matches,
+    matchCount,
+    allTimeMatchCount,
   };
 }
 
@@ -53,6 +74,7 @@ function listVenues(options) {
   const input = options && typeof options === 'object' ? options : {};
   const keyword = pickText(input.keyword).toLowerCase();
   const data = load();
+  const season = getSeason(data, input.seasonId);
 
   let list = data.venues.slice();
   if (keyword) {
@@ -61,7 +83,9 @@ function listVenues(options) {
   list.sort((a, b) => b.capacity - a.capacity);
 
   return {
-    venues: list.map((item) => withExtras(item, data)),
+    seasonId: season.id,
+    seasonName: season.name,
+    venues: list.map((item) => withExtras(item, data, season)),
     total: data.venues.length,
     weekdayText: WEEKDAY_TEXT,
   };
@@ -74,7 +98,8 @@ function createVenue(payload) {
   const created = { id: crypto.randomUUID(), ...checked, createdAt: now, updatedAt: now };
   data.venues.push(created);
   save(data);
-  return withExtras(created, data);
+  const season = getSeason(data, (payload && payload.seasonId) || '');
+  return withExtras(created, data, season);
 }
 
 function updateVenue(id, payload) {
@@ -86,17 +111,22 @@ function updateVenue(id, payload) {
   Object.assign(found, checked);
   found.updatedAt = new Date().toISOString();
   save(data);
-  return withExtras(found, data);
+  const season = getSeason(data, (payload && payload.seasonId) || '');
+  return withExtras(found, data, season);
 }
 
 function deleteVenue(id) {
   const data = load();
   const index = data.venues.findIndex((item) => item.id === id);
   if (index === -1) throw new ApiError(404, 'VENUE_NOT_FOUND', '这个场地不存在或已被删除', '');
+  // 场地被任一赛季的赛程引用都不能删，历史记录要保留场地名以外的关联线索
+  let matchCount = 0;
+  data.seasons.forEach((season) => {
+    matchCount += season.matches.filter((item) => item.venueId === id).length;
+  });
   const homeCount = data.teams.filter((item) => item.venueId === id).length;
-  const matchCount = data.matches.filter((item) => item.venueId === id).length;
   if (homeCount > 0 || matchCount > 0) {
-    throw new ApiError(409, 'VENUE_IN_USE', `这个场地还被 ${homeCount} 支球队当主场、${matchCount} 场赛程在用，不能直接删`, '');
+    throw new ApiError(409, 'VENUE_IN_USE', `这个场地还被 ${homeCount} 支球队当主场、历史赛程里有 ${matchCount} 场在用，不能直接删`, '');
   }
   const [removed] = data.venues.splice(index, 1);
   save(data);

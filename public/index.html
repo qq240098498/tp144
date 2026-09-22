@@ -17,8 +17,14 @@
         </div>
       </div>
 
+      <label class="season-switch">
+        <span>查看赛季</span>
+        <select id="season-select"></select>
+      </label>
+
       <nav class="nav" id="nav">
         <button type="button" class="nav-item is-active" data-view="overview"><span>概览</span><em>全局</em></button>
+        <button type="button" class="nav-item" data-view="seasons"><span>赛季</span><em id="nav-seasons">升降级</em></button>
         <button type="button" class="nav-item" data-view="teams"><span>球队</span><em id="nav-teams">0</em></button>
         <button type="button" class="nav-item" data-view="venues"><span>场地</span><em id="nav-venues">0</em></button>
         <button type="button" class="nav-item" data-view="matches"><span>赛程</span><em id="nav-matches">0</em></button>
@@ -42,6 +48,8 @@
         <div class="head-actions" id="head-actions"></div>
       </header>
 
+      <div class="freeze-banner" id="freeze-banner" hidden></div>
+
       <section class="view is-active" id="view-overview">
         <div class="stat-row" id="stat-row"></div>
         <div class="split">
@@ -56,12 +64,17 @@
         </div>
       </section>
 
+      <section class="view" id="view-seasons">
+        <div id="season-panels"></div>
+      </section>
+
       <section class="view" id="view-teams">
         <div class="toolbar">
           <div class="segmented" id="team-status-filter">
             <button type="button" class="is-active" data-value="">全部</button>
             <button type="button" data-value="参赛">参赛</button>
             <button type="button" data-value="退赛">退赛</button>
+            <button type="button" data-value="外池" id="team-filter-outside">外池</button>
           </div>
           <input id="team-keyword" placeholder="搜队名、简称或城市" maxlength="24">
           <button type="button" class="ghost" id="team-search">查询</button>
@@ -70,7 +83,7 @@
           <table class="grid">
             <thead>
               <tr>
-                <th>档位</th><th>球队</th><th>简称</th><th>城市</th><th>主场</th><th>场次</th><th>状态</th><th>备注</th><th></th>
+                <th>档位</th><th>球队</th><th>简称</th><th>城市</th><th>主场</th><th>归属</th><th>本季名次</th><th>场次</th><th>备注</th><th></th>
               </tr>
             </thead>
             <tbody id="team-rows"></tbody>
@@ -124,8 +137,8 @@
           <table class="grid standings">
             <thead>
               <tr>
-                <th>名次</th><th>球队</th><th>场次</th><th>胜</th><th>平</th><th>负</th>
-                <th>进球</th><th>失球</th><th>净胜</th><th>积分</th>
+                <th>名次</th><th>档位</th><th>球队</th><th>场次</th><th>胜</th><th>平</th><th>负</th>
+                <th>进球</th><th>失球</th><th>净胜</th><th>积分</th><th>季末去向</th>
               </tr>
             </thead>
             <tbody id="table-rows"></tbody>
